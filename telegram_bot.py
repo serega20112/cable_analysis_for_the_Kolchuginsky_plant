@@ -1,64 +1,41 @@
 import telebot
 from cable_analyzer import CableAnalyzer
-
+import cv2
 # Ваши токены и настройки
 BOT_TOKEN = "8175430341:AAH5giS2p020esrFuUt0GzeBb0HQPr9x5lw"
-PIXELS_PER_MM = None  #  Задайте значение, если известно, например, 5
+PIXELS_PER_MM = None  # Задайте значение, если известно, например, 5
 
 # Создание экземпляра анализатора
-analyzer = CableAnalyzer(pixels_per_mm=PIXELS_PER_MM)
+def start(update, context):
+    context.bot.send_message(chat_id=update.effective_chat.id, text="Привет! Отправьте мне изображение кабеля для анализа.")
 
-# Создание объекта бота
-bot = telebot.TeleBot(BOT_TOKEN)
+def analyze_image(update, context):
+    image_bytes = context.bot.get_file(update.message.photo[-1].file_id).download_as_bytearray()
+    analyzer = CableAnalyzer()
+    result = analyzer.analyze_image_bytes(image_bytes)
+    if result:
+        num_cores = result["num_cores"]
+        diameter_px = result["diameter_px"]
+        diameter_mm = result["diameter_mm"]
+        processed_image = result["processed_image"]
 
+        # Сохраняем обработанное изображение в файл
+        analyzer.save_processed_image(processed_image, "processed_image.jpg")
 
-@bot.message_handler(content_types=["photo"])
-def handle_photo(message):
-    try:
-        # 1. Получение информации о файле изображения
-        file_id = message.photo[-1].file_id
-        file_info = bot.get_file(file_id)
+        # Отправляем результат пользователю
+        context.bot.send_message(chat_id=update.effective_chat.id, text=f"Количество сердечников: {num_cores}\nДиаметр (px): {diameter_px}\nДиаметр (мм): {diameter_mm}")
+        context.bot.send_photo(chat_id=update.effective_chat.id, photo=open("processed_image.jpg", "rb"))
 
-        # 2. Загрузка файла изображения в виде байтов
-        file = bot.download_file(file_info.file_path)
+def main():
+    updater = Updater(TOKEN, use_context=True)
 
-        # 3. Анализ изображения
-        analysis_result = analyzer.analyze_image_bytes(file)
+    dp = updater.dispatcher
 
-        # 4. Формирование ответа
-        response = create_response(analysis_result)
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(MessageHandler(Filters.photo, analyze_image))
 
-        # 5. Отправка ответа пользователю
-        bot.send_message(message.chat.id, response)
+    updater.start_polling()
+    updater.idle()
 
-    except Exception as e:
-        print(f"Ошибка: {e}")
-        bot.send_message(message.chat.id, "Произошла ошибка при обработке изображения.")
-
-
-
-def create_response(analysis_result):
-    """Формирует текстовое описание анализа.
-
-    Args:
-        analysis_result (dict): Результат анализа.
-
-    Returns:
-        str: Текстовое описание.
-    """
-    response = "Результат анализа:\n"
-    if analysis_result.get("num_cores"):
-        response += f"• Количество жил: {analysis_result['num_cores']}\n"
-    if analysis_result.get("diameter_px"):
-        response += f"• Диаметр кабеля (пиксели): {analysis_result['diameter_px']:.1f}\n"
-    if analysis_result.get("diameter_mm"):
-        response += f"• Диаметр кабеля (мм): {analysis_result['diameter_mm']:.1f}\n"
-    # ... добавьте другие характеристики ...
-
-    if response == "Результат анализа:\n":
-        response = "Не удалось проанализировать изображение кабеля."
-
-    return response
-
-
-bot.polling()
+if __name__ == '__main__':
+    main()
