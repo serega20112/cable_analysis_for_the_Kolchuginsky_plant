@@ -1,12 +1,12 @@
+import os
 import cv2
 import numpy as np
 from PIL import Image
 import io
 
-class CableAnalyzer:
-    def __init__(self, model_path=None, pixels_per_mm=None):
-        self.model = self.load_model(model_path) if model_path else None
-        self.pixels_per_mm = pixels_per_mm
+class DeepLearningModel:
+    def __init__(self, model_path):
+        self.model = self.load_model(model_path)
 
     def load_model(self, model_path):
         """Загрузка модели глубокого обучения из файла."""
@@ -16,6 +16,28 @@ class CableAnalyzer:
         except Exception as e:
             print(f"Ошибка при загрузке модели: {e}")
             return None
+
+    def apply_model(self, img, threshold_value):
+        """Применение модели глубокого обучения к изображению."""
+        img_resized = cv2.resize(img, (512, 512))
+        blob = cv2.dnn.blobFromImage(img_resized, 1/255, (512, 512), (0, 0, 0), True, crop=False)
+        self.model.setInput(blob)
+        output = self.model.forward()
+        output = output[0]
+        output = cv2.resize(output, (img.shape[1], img.shape[0]))
+        _, thresh = cv2.threshold(output, threshold_value, 255, cv2.THRESH_BINARY)
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        for contour in contours:
+            cv2.drawContours(img, [contour], -1, (0, 255, 0), 2)
+
+        return img
+
+class CableAnalyzer:
+    def __init__(self, model_path=None, pixels_per_mm=None):
+        self.model = DeepLearningModel(model_path) if model_path else None
+        self.pixels_per_mm = pixels_per_mm
+        self.roi = []
 
     def analyze_image_bytes(self, image_bytes, known_diameter_mm=None, upscale_factor=1, blur_size=(5, 5), threshold_value=0.5):
         """Анализ изображения, переданного в байтовом формате."""
@@ -44,6 +66,10 @@ class CableAnalyzer:
                 self.pixels_per_mm = cable_diameter_px / known_diameter_mm
 
             cable_diameter_mm = cable_diameter_px / self.pixels_per_mm if self.pixels_per_mm else None
+
+            # Применяем модель глубокого обучения, если она загружена
+            if self.model:
+                img = self.model.apply_model(img, threshold_value)
 
             # Рисуем контуры на изображении
             for contour in cable_contours:
@@ -89,22 +115,6 @@ class CableAnalyzer:
             if area > 100 and aspect_ratio > 2:
                 cable_contours.append(contour)
         return cable_contours
-
-    def _apply_deep_learning_model(self, img, threshold_value):
-        """Применение модели глубокого обучения к изображению."""
-        img_resized = cv2.resize(img, (512, 512))
-        blob = cv2.dnn.blobFromImage(img_resized, 1/255, (512, 512), (0, 0, 0), True, crop=False)
-        self.model.setInput(blob)
-        output = self.model.forward()
-        output = output[0]
-        output = cv2.resize(output, (img.shape[1], img.shape[0]))
-        _, thresh = cv2.threshold(output, threshold_value, 255, cv2.THRESH_BINARY)
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        for contour in contours:
-            cv2.drawContours(img, [contour], -1, (0, 255, 0), 2)
-
-        return img
 
     def save_processed_image(self, processed_image, file_path):
         """Сохранение обработанного изображения в файл."""
